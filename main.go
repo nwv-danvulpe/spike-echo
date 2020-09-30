@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -22,10 +23,17 @@ var (
 		},
 		[]string{"endpoint"},
 	)
+	pingRequests = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payments_ping_request_count",
+		},
+		[]string{"remote_ip"},
+	)
 )
 
 func init() {
 	prometheus.MustRegister(callSummary)
+	prometheus.MustRegister(pingRequests)
 }
 
 func main() {
@@ -114,9 +122,10 @@ func (p *pingClient) ping() error {
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("received ping request from: %v\n", r.RemoteAddr)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
+	remoteAddr := strings.Split(r.RemoteAddr, ":")
+	pingRequests.WithLabelValues(remoteAddr[0]).Inc()
 }
 
 func createPrometheusEndpoint() {
