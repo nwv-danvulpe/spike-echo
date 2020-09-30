@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/pires/go-proxyproto"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -18,9 +20,15 @@ func main() {
 
 	go pingRemote(remoteEndpoint)
 
-	serverPort := os.Getenv("PORT")
+	addr := fmt.Sprintf(":%s", os.Getenv("PORT"))
+	list, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("could not listen to %s: %v\n", addr, err)
+	}
+	proxyListener := &proxyproto.Listener{Listener: list}
+	defer proxyListener.Close()
 
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", serverPort), mux))
+	log.Fatal(http.Serve(proxyListener, mux))
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
