@@ -4,12 +4,29 @@ import (
 	"context"
 	"fmt"
 	"github.com/pires/go-proxyproto"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"time"
 )
+
+var (
+	callSummary = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "payments_request_duration_ms",
+			Help:    "Payments latency distributions.",
+			Buckets: []float64{0.001, 0.01, 0.1, 1, 5, 10, 50, 500, 1000, 5000},
+		},
+		[]string{"response_code"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(callSummary)
+}
 
 func main() {
 	mux := http.NewServeMux()
@@ -27,6 +44,8 @@ func main() {
 	}
 	proxyListener := &proxyproto.Listener{Listener: list}
 	defer proxyListener.Close()
+
+	go createPrometheusEndpoint()
 
 	log.Fatal(http.Serve(proxyListener, mux))
 }
@@ -58,8 +77,8 @@ func (p *pingClient) Start() {
 		case <-time.After(time.Second):
 			start := time.Now()
 			err := p.ping()
-			end := time.Now()
-			duration := end.Sub(start)
+			duration := time.Since(start)
+			callSummary.WithLabelValues("-").Observe(float64(duration.Milliseconds()))
 			if err != nil {
 				fmt.Printf("Received err: %v, after: %v\n", err, duration)
 				continue
@@ -90,4 +109,21 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("received ping request from: %v\n", r.RemoteAddr)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
+}
+
+func createPrometheusEndpoint() {
+	mux := http.NewServeMux()
+
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "OK")
+	})
+
+	srv := &http.Server{
+		Handler:      mux,
+		Addr:         ":8001",
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
+	srv.ListenAndServe()
 }
