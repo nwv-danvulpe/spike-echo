@@ -18,7 +18,7 @@ func main() {
 
 	remoteEndpoint := os.Getenv("REMOTE_ENDPOINT")
 
-	go pingRemote(remoteEndpoint)
+	go newPingClient(remoteEndpoint).Start()
 
 	addr := fmt.Sprintf(":%s", os.Getenv("PORT"))
 	list, err := net.Listen("tcp", addr)
@@ -35,12 +35,29 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func pingRemote(endpoint string) {
+type pingClient struct {
+	client   *http.Client
+	endpoint string
+}
+
+func newPingClient(remoteEndpoint string) *pingClient {
+	client := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+	return &pingClient{
+		client:   client,
+		endpoint: remoteEndpoint,
+	}
+}
+
+func (p *pingClient) Start() {
 	for {
 		select {
 		case <-time.After(time.Second):
 			start := time.Now()
-			err := ping(endpoint)
+			err := p.ping()
 			end := time.Now()
 			duration := end.Sub(start)
 			if err != nil {
@@ -52,17 +69,14 @@ func pingRemote(endpoint string) {
 	}
 }
 
-func ping(endpoint string) error {
+func (p *pingClient) ping() error {
 	timeout, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(timeout, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(timeout, http.MethodGet, p.endpoint, nil)
 	if err != nil {
 		return err
 	}
-	client := &http.Client{
-		Transport: &http.Transport{},
-	}
-	res, err := client.Do(req)
+	res, err := p.client.Do(req)
 	if err != nil {
 		return err
 	}
