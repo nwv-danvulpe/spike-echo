@@ -20,7 +20,7 @@ var (
 			Help:    "Payments latency distributions.",
 			Buckets: []float64{0.1, 1, 5, 10, 25, 50, 100, 200, 500, 1000, 5000},
 		},
-		[]string{"response_code"},
+		[]string{"endpoint"},
 	)
 )
 
@@ -33,9 +33,17 @@ func main() {
 	mux.HandleFunc("/ping", pingHandler)
 	mux.HandleFunc("/healthz", healthHandler)
 
-	remoteEndpoint := os.Getenv("REMOTE_ENDPOINT")
+	remoteAddr := os.Getenv("REMOTE_ADDR")
+	ips, err := net.LookupIP(remoteAddr)
+	if err != nil {
+		log.Fatalf("could not look up ip addresses: %v\n", err)
+	}
 
-	go newPingClient(remoteEndpoint).Start()
+	for _, ip := range ips {
+		remoteEndpoint := fmt.Sprintf("http://%s:8000/ping", ip.To4())
+		log.Printf("Starting client for endpoint: %v\n", remoteEndpoint)
+		go newPingClient(remoteEndpoint).Start()
+	}
 
 	addr := fmt.Sprintf(":%s", os.Getenv("PORT"))
 	list, err := net.Listen("tcp", addr)
@@ -79,12 +87,11 @@ func (p *pingClient) Start() {
 			start := time.Now()
 			err := p.ping()
 			duration := time.Since(start)
-			callSummary.WithLabelValues("-").Observe(float64(duration.Milliseconds()))
+			callSummary.WithLabelValues(p.endpoint).Observe(float64(duration.Milliseconds()))
 			if err != nil {
 				fmt.Printf("Received err: %v, after: %v\n", err, duration)
 				continue
 			}
-			fmt.Printf("Received ping response after: %v\n", duration)
 		}
 	}
 }
