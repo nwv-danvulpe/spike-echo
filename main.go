@@ -12,6 +12,7 @@ import (
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", pingHandler)
+	mux.HandleFunc("/healthz", healthHandler)
 
 	remoteEndpoint := os.Getenv("REMOTE_ENDPOINT")
 
@@ -20,6 +21,10 @@ func main() {
 	serverPort := os.Getenv("PORT")
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", serverPort), mux))
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
 }
 
 func pingRemote(endpoint string) {
@@ -60,6 +65,7 @@ func ping(endpoint string) error {
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("received ping request from: %v\n", r.RemoteAddr)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }
