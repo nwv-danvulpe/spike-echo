@@ -18,7 +18,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "payments_request_duration_ms",
 			Help:    "Payments latency distributions.",
-			Buckets: []float64{0.1, 1, 5, 10, 25, 50, 500, 1000, 5000},
+			Buckets: []float64{0.1, 1, 5, 10, 25, 50, 100, 200, 500, 1000, 5000},
 		},
 		[]string{"response_code"},
 	)
@@ -62,7 +62,8 @@ type pingClient struct {
 func newPingClient(remoteEndpoint string) *pingClient {
 	client := &http.Client{
 		Transport: &http.Transport{
-			DisableKeepAlives: true,
+			DisableKeepAlives: false,
+			IdleConnTimeout:   time.Minute,
 		},
 	}
 	return &pingClient{
