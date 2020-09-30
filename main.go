@@ -21,7 +21,7 @@ var (
 			Help:    "Payments latency distributions.",
 			Buckets: []float64{0.1, 1, 5, 10, 25, 50, 100, 200, 500, 1000, 5000},
 		},
-		[]string{"endpoint"},
+		[]string{"availability_zone", "endpoint"},
 	)
 	pingRequests = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -31,9 +31,12 @@ var (
 	)
 )
 
+var availabilityZone string
+
 func init() {
 	prometheus.MustRegister(callSummary)
 	prometheus.MustRegister(pingRequests)
+	availabilityZone = os.Getenv("AVAILABILITY_ZONE")
 }
 
 func main() {
@@ -95,7 +98,7 @@ func (p *pingClient) Start() {
 			start := time.Now()
 			err := p.ping()
 			duration := time.Since(start)
-			callSummary.WithLabelValues(p.endpoint).Observe(float64(duration.Milliseconds()))
+			callSummary.WithLabelValues(availabilityZone, p.endpoint).Observe(float64(duration.Milliseconds()))
 			if err != nil {
 				fmt.Printf("Received err: %v, after: %v\n", err, duration)
 				continue
