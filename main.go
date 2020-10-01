@@ -45,15 +45,8 @@ func main() {
 	mux.HandleFunc("/healthz", healthHandler)
 
 	remoteAddr := os.Getenv("REMOTE_ADDR")
-	ips, err := net.LookupIP(remoteAddr)
-	if err != nil {
-		log.Fatalf("could not look up ip addresses: %v\n", err)
-	}
-
-	for _, ip := range ips {
-		remoteEndpoint := fmt.Sprintf("http://%s:8000/ping", ip.To4())
-		log.Printf("Starting client for endpoint: %v\n", remoteEndpoint)
-		go newPingClient(remoteEndpoint).Start()
+	if remoteAddr != "" {
+		startPinging(remoteAddr)
 	}
 
 	addr := fmt.Sprintf(":%s", os.Getenv("PORT"))
@@ -67,6 +60,19 @@ func main() {
 	go createPrometheusEndpoint()
 
 	log.Fatal(http.Serve(proxyListener, mux))
+}
+
+func startPinging(remoteAddr string) {
+	ips, err := net.LookupIP(remoteAddr)
+	if err != nil {
+		log.Fatalf("could not look up ip addresses: %v\n", err)
+	}
+
+	for _, ip := range ips {
+		remoteEndpoint := fmt.Sprintf("http://%s:8000/ping", ip.To4())
+		log.Printf("Starting client for endpoint: %v\n", remoteEndpoint)
+		go newPingClient(remoteEndpoint).Start()
+	}
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
