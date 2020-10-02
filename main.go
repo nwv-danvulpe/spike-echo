@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -43,10 +45,16 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", pingHandler)
 	mux.HandleFunc("/healthz", healthHandler)
+	mux.Handle("/metrics", promhttp.Handler())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	remoteAddr := os.Getenv("REMOTE_ADDR")
-	if remoteAddr != "" {
-		startPinging(remoteAddr)
+	remoteAddrs := os.Getenv("REMOTE_ADDR")
+	if remoteAddrs != "" {
+		addrs := strings.Split(remoteAddrs, ",")
+		for _, addr := range addrs {
+			startPinging(ctx, addr)
+		}
 	}
 
 	addr := fmt.Sprintf(":%s", os.Getenv("PORT"))
@@ -57,21 +65,42 @@ func main() {
 	proxyListener := &proxyproto.Listener{Listener: list}
 	defer proxyListener.Close()
 
-	go createPrometheusEndpoint()
+	go createPrometheusEndpoint(ctx)
 
-	log.Fatal(http.Serve(proxyListener, mux))
+	srv := &http.Server{Handler: mux}
+
+	go func() {
+		<-ctx.Done()
+		timeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(timeout)
+	}()
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		fmt.Printf("Stopping")
+		cancel()
+	}()
+
+	log.Fatal(srv.Serve(proxyListener))
 }
 
-func startPinging(remoteAddr string) {
+func startPinging(ctx context.Context, remoteAddr string) {
+	fmt.Printf("Resolving %v\n", remoteAddr)
 	ips, err := net.LookupIP(remoteAddr)
 	if err != nil {
 		log.Fatalf("could not look up ip addresses: %v\n", err)
 	}
 
 	for _, ip := range ips {
+		if ip.To4() == nil {
+			continue
+		}
 		remoteEndpoint := fmt.Sprintf("http://%s:8000/ping", ip.To4())
 		log.Printf("Starting client for endpoint: %v\n", remoteEndpoint)
-		go newPingClient(remoteEndpoint).Start()
+		go newPingClient(remoteEndpoint).Start(ctx)
 	}
 }
 
@@ -97,9 +126,11 @@ func newPingClient(remoteEndpoint string) *pingClient {
 	}
 }
 
-func (p *pingClient) Start() {
+func (p *pingClient) Start(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-time.After(time.Second):
 			start := time.Now()
 			err := p.ping()
@@ -137,7 +168,7 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	pingRequests.WithLabelValues(remoteAddr[0]).Inc()
 }
 
-func createPrometheusEndpoint() {
+func createPrometheusEndpoint(ctx context.Context) {
 	mux := http.NewServeMux()
 
 	mux.Handle("/metrics", promhttp.Handler())
@@ -151,5 +182,13 @@ func createPrometheusEndpoint() {
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			timeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			srv.Shutdown(timeout)
+		}
+	}()
 	srv.ListenAndServe()
 }
